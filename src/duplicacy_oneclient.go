@@ -499,7 +499,7 @@ func (client *OneDriveClient) MoveFile(path string, parent string) error {
 
 func (client *OneDriveClient) CreateDirectory(path string, name string) error {
 
-	url := client.APIURL + "/root/children"
+	url := client.APIURL + "/drive/root/children"
 	if client.SharedDriveID != "" {
 		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + "/children"
 	}
