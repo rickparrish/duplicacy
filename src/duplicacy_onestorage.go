@@ -30,7 +30,7 @@ func CreateOneDriveStorage(tokenFile string, isBusiness bool, storagePath string
 		return nil, err
 	}
 
-	fileID, isDir, _, err := client.GetFileInfo(storagePath)
+	fileID, isDir, _, err := client.DetectSharedStorage(storagePath)
 	if err != nil {
 		return nil, err
 	}
