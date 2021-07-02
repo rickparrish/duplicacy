@@ -48,12 +48,11 @@ type OneDriveClient struct {
 	RefreshTokenURL string
 	APIURL string
 	
-	SharedAPIURL string
-	SharedDriveID string
-	SharedItemID string
+	DriveID string
+	FolderID string
 }
 
-func NewOneDriveClient(tokenFile string, isBusiness bool) (*OneDriveClient, error) {
+func NewOneDriveClient(tokenFile string, isBusiness bool, storagePath string) (*OneDriveClient, error) {
 
 	description, err := ioutil.ReadFile(tokenFile)
 	if err != nil {
@@ -75,15 +74,24 @@ func NewOneDriveClient(tokenFile string, isBusiness bool) (*OneDriveClient, erro
 
 	if isBusiness {
 		client.RefreshTokenURL = "https://duplicacy.com/odb_refresh"
-		client.APIURL = "https://graph.microsoft.com/v1.0/me"
-		client.SharedAPIURL = "https://graph.microsoft.com/v1.0"
+		client.APIURL = "https://graph.microsoft.com/v1.0"
 	} else {
 		client.RefreshTokenURL = "https://duplicacy.com/one_refresh"
 		client.APIURL = "https://api.onedrive.com/v1.0"
-		client.SharedAPIURL = "https://api.onedrive.com/v1.0"
 	}
 
 	client.RefreshToken(false)
+	
+	err = client.InitDriveID(storagePath)
+	if err != nil {
+		return nil, err
+	}
+	if client.DriveID == "" {
+		return nil, fmt.Errorf("Failed to initialize DriveID (does path '%s' exist?)", storagePath)
+	}
+	if client.FolderID == "" {
+		return nil, fmt.Errorf("Failed to initialize FolderID (does path '%s' exist?)", storagePath)
+	}
 
 	return client, nil
 }
@@ -259,6 +267,9 @@ type OneDriveEntry struct {
 			DriveID   string `json:"driveId"`
 		} `json:"parentReference"`
 	} `json:"remoteItem"`
+	ParentReference struct {
+		DriveID   string `json:"driveId"`
+	} `json:"parentReference"`
 }
 
 type OneDriveListEntriesOutput struct {
@@ -270,16 +281,9 @@ func (client *OneDriveClient) ListEntries(path string) ([]OneDriveEntry, error) 
 
 	entries := []OneDriveEntry{}
 
-	url := client.APIURL + "/drive/root:/" + path + ":/children"
-	if client.SharedDriveID != "" {
-		LOG_WARN("ONEDRIVE_CALL", "WARNING: ListEntries not tested for shared drives yet")
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path) + ":/children"
-	}
-	if path == "" {
-		url = client.APIURL + "/drive/root/children"
-		if client.SharedDriveID != "" {
-			url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + "/children"
-		}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path) + ":/children"
+	if GetPrunedPath(path) == "" {
+		url = client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + "/children"
 	}
 	if client.TestMode {
 		url += "?top=8"
@@ -315,10 +319,7 @@ func (client *OneDriveClient) ListEntries(path string) ([]OneDriveEntry, error) 
 
 func (client *OneDriveClient) GetFileInfo(path string) (string, bool, int64, error) {
 
-	url := client.APIURL + "/drive/root:/" + path
-	if client.SharedDriveID != "" {
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path)
-	}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path)
 	url += "?select=id,name,size,folder"
 
 	readCloser, _, err := client.call(url, "GET", 0, "")
@@ -343,10 +344,7 @@ func (client *OneDriveClient) GetFileInfo(path string) (string, bool, int64, err
 
 func (client *OneDriveClient) DownloadFile(path string) (io.ReadCloser, int64, error) {
 
-	url := client.APIURL + "/drive/items/root:/" + path + ":/content"
-	if client.SharedDriveID != "" {
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path) + ":/content"
-	}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path) + ":/content"
 
 	return client.call(url, "GET", 0, "")
 }
@@ -356,10 +354,7 @@ func (client *OneDriveClient) UploadFile(path string, content []byte, rateLimit 
 	// Upload file using the simple method; this is only possible for OneDrive Personal or if the file
 	// is smaller than 4MB for OneDrive Business
 	if !client.IsBusiness || (client.TestMode && rand.Int() % 2 == 0) {
-		url := client.APIURL + "/drive/root:/" + path + ":/content"
-		if client.SharedDriveID != "" {
-			url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path) + ":/content"
-		}
+		url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path) + ":/content"
 
 		readCloser, _, err := client.call(url, "PUT", CreateRateLimitedReader(content, rateLimit), "application/octet-stream")
 		if err != nil {
@@ -386,10 +381,7 @@ func (client *OneDriveClient) CreateUploadSession(path string) (uploadURL string
 		Name string `json:"name"`
 	}
 
-	url := client.APIURL + "/drive/root:/" + path + ":/createUploadSession"
-	if client.SharedDriveID != "" {
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path) + ":/createUploadSession"
-	}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path) + ":/createUploadSession"
 	
 	input := map[string]interface{} {
 		"item": CreateUploadSessionItem {
@@ -442,11 +434,7 @@ func (client *OneDriveClient) UploadFileSession(uploadURL string, content []byte
 
 func (client *OneDriveClient) DeleteFile(path string) error {
 
-	url := client.APIURL + "/drive/root:/" + path
-	if client.SharedDriveID != "" {
-		LOG_WARN("ONEDRIVE_CALL", "WARNING: DeleteFile not tested for shared drives yet")
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path)
-	}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path)
 
 	readCloser, _, err := client.call(url, "DELETE", 0, "")
 	if err != nil {
@@ -459,17 +447,10 @@ func (client *OneDriveClient) DeleteFile(path string) error {
 
 func (client *OneDriveClient) MoveFile(path string, parent string) error {
 
-	url := client.APIURL + "/drive/root:/" + path
-	if client.SharedDriveID != "" {
-		LOG_WARN("ONEDRIVE_CALL", "WARNING: MoveFile not tested for shared drives yet")
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path)
-	}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path)
 
 	parentReference := make(map[string]string)
-	parentReference["path"] = "/drive/root:/" + parent
-	if client.SharedDriveID != "" {
-		parentReference["path"] = "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(parent)
-	}
+	parentReference["path"] = "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(parent)
 
 	parameters := make(map[string]interface{})
 	parameters["parentReference"] = parentReference
@@ -499,12 +480,9 @@ func (client *OneDriveClient) MoveFile(path string, parent string) error {
 
 func (client *OneDriveClient) CreateDirectory(path string, name string) error {
 
-	url := client.APIURL + "/drive/root/children"
-	if client.SharedDriveID != "" {
-		url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + "/children"
-	}
+	url := client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + "/children"
 
-	if path != "" {
+	if GetPrunedPath(path) != "" {
 
 		pathID, isDir, _, err := client.GetFileInfo(path)
 		if err != nil {
@@ -524,10 +502,7 @@ func (client *OneDriveClient) CreateDirectory(path string, name string) error {
 			return fmt.Errorf("The path '%s' is not a directory", path)
 		}
 
-		url = client.APIURL + "/drive/root:/" + path + ":/children"
-		if client.SharedDriveID != "" {
-			url = client.SharedAPIURL + "/drives/" + client.SharedDriveID + "/items/" + client.SharedItemID + ":/" + GetPrunedPath(path) + ":/children"
-		}
+		url = client.APIURL + "/drives/" + client.DriveID + "/items/" + client.FolderID + ":/" + GetPrunedPath(path) + ":/children"
 	}
 
 	parameters := make(map[string]interface{})
@@ -548,20 +523,20 @@ func (client *OneDriveClient) CreateDirectory(path string, name string) error {
 	return nil
 }
 
-func (client *OneDriveClient) DetectSharedStorage(storagePath string) (string, bool, int64, error) {
+func (client *OneDriveClient) InitDriveID(storagePath string) (error) {
 	
 	// Shared folders can only be accessed by the first directory in the path,
 	// so we only pass that instead of the full storagePath
 	firstDirectory := strings.Split(storagePath, "/")[0]
 	url := client.APIURL + "/drive/root:/" + firstDirectory
-	url += "?select=remoteItem"
+	url += "?select=id,parentReference,remoteItem"
 
 	readCloser, _, err := client.call(url, "GET", 0, "")
 	if err != nil {
 		if e, ok := err.(OneDriveError); ok && e.Status == 404 {
-			return "", false, 0, nil
+			return nil
 		} else {
-			return "", false, 0, err
+			return err
 		}
 	}
 
@@ -570,16 +545,19 @@ func (client *OneDriveClient) DetectSharedStorage(storagePath string) (string, b
 	output := &OneDriveEntry{}
 
 	if err = json.NewDecoder(readCloser).Decode(&output); err != nil {
-		return "", false, 0, err
+		return err
 	}
 	
-	// The target is a shared folder, so store the DriveID and ItemID, which we'll use in URLs later
-	if output.RemoteItem.ParentReference.DriveID != "" {
-		client.SharedDriveID = output.RemoteItem.ParentReference.DriveID
-		client.SharedItemID = output.RemoteItem.ID
+	// Store the DriveID and FolderID, which we'll use in URLs later
+	if output.RemoteItem.ParentReference.DriveID != "" && output.RemoteItem.ID != "" {
+		client.DriveID = output.RemoteItem.ParentReference.DriveID
+		client.FolderID = output.RemoteItem.ID
+	} else if output.ParentReference.DriveID != "" && output.ID != "" {
+		client.DriveID = output.ParentReference.DriveID
+		client.FolderID = output.ID
 	}
 	
-	return client.GetFileInfo(storagePath)
+	return nil
 }
 
 func GetPrunedPath(path string) (string) {

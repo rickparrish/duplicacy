@@ -32,7 +32,7 @@ func TestOneDriveClient(t *testing.T) {
 		tokenFile = "odb-token.json"
 	}
 
-	oneDriveClient, err := NewOneDriveClient(tokenFile, isBusiness)
+	oneDriveClient, err := NewOneDriveClient(tokenFile, isBusiness, testDir)
 	if err != nil {
 		t.Errorf("Failed to create the OneDrive client: %v", err)
 		return
@@ -40,8 +40,6 @@ func TestOneDriveClient(t *testing.T) {
 
 	oneDriveClient.TestMode = true
 	
-	oneDriveClient.DetectSharedStorage(testDir)
-
 	existingFiles, err := oneDriveClient.ListEntries("")
 	for _, file := range existingFiles {
 		fmt.Printf("name: %s, isDir: %t\n", file.Name, len(file.Folder) != 0)
@@ -53,16 +51,8 @@ func TestOneDriveClient(t *testing.T) {
 		return
 	}
 	if testID == "" {
-		if isShared {
-			t.Errorf("Test directory must exist for shared testing: " + testDir)
-			return
-		} else {
-			err = oneDriveClient.CreateDirectory("", testDir)
-			if err != nil {
-				t.Errorf("Failed to create the test directory: %v", err)
-				return
-			}
-		}
+		t.Errorf("Test directory '%s' must exist before test can run", testDir)
+		return
 	}
 
 	test1ID, _, _, err := oneDriveClient.GetFileInfo(testDir + "/test1")
